@@ -67,6 +67,10 @@ export interface CrawlOptions {
   maxPages?: number; // overall page visit limit
   maxDepth?: number; // link depth limit
   sameOrigin?: boolean; // restrict to same origin as start URL
+  // Enable JavaScript rendering for SPA pages
+  jsRender?: boolean;
+  jsWaitMs?: number;
+  jsWaitSelector?: string;
 }
 
 export class Scanner {
@@ -733,7 +737,11 @@ export class Scanner {
     opts: CrawlOptions = {}
   ): Promise<ScanResult[]> {
     const { maxPages = 50, maxDepth = 3, sameOrigin = true } = opts;
+    const jsRender = !!opts.jsRender;
+    const jsWaitMs = Math.max(0, opts.jsWaitMs ?? 0);
+    const jsWaitSelector = opts.jsWaitSelector;
     const start = new URL(startUrl);
+    let originBase = new URL(startUrl);
     const visited = new Set<string>();
     const toVisit: Array<{ url: string; depth: number }> = [
       { url: this.normalizeUrl(start.toString()), depth: 0 },
@@ -747,12 +755,66 @@ export class Scanner {
       if (visited.has(url)) continue;
       visited.add(url);
 
-      // Fetch page
-      const res = await this.baselineFetch({ url });
-      const html = res.text || "";
+      // Fetch page (optionally with JS rendering)
+      let html = "";
+      let status = 0;
+      let fetchedUrl = url;
+      if (jsRender) {
+        try {
+          const { renderPage } = await import("./jsrender.js");
+          const rendered = await renderPage(url, {
+            waitMs: jsWaitMs,
+            waitSelector: jsWaitSelector,
+            timeoutMs: this.timeoutMs,
+            waitUntil: "networkidle",
+          });
+          if (rendered && rendered.html) {
+            html = rendered.html;
+            fetchedUrl = rendered.url || url;
+            status = 200;
+          }
+        } catch {
+          /* ignore and fall back */
+        }
+      }
+      if (!html) {
+        // Follow HTTP redirects (Location) up to 5 hops
+        let current = url;
+        let redirects = 0;
+        for (let i = 0; i < 5; i++) {
+          const res = await this.baselineFetch({ url: current });
+          html = res.text || "";
+          status = res.status;
+          fetchedUrl = current;
+          const loc = (res.headers || {})["location"];
+          if (
+            (status === 301 ||
+              status === 302 ||
+              status === 303 ||
+              status === 307 ||
+              status === 308) &&
+            loc
+          ) {
+            const next = this.resolveUrl(current, String(loc));
+            if (next) {
+              this.logger.emit("crawler", "redirect", {
+                from: current,
+                to: next,
+                status,
+              });
+              current = next;
+              redirects++;
+              continue;
+            }
+          }
+          break;
+        }
+      }
       this.logger.emit("crawler", `fetched ${url}`, {
-        status: res.status,
+        status,
         len: html.length,
+        js: jsRender,
+        finalUrl: fetchedUrl,
       });
       if (!/<\w+/i.test(html)) {
         continue;
@@ -760,15 +822,41 @@ export class Scanner {
 
       const $ = load(html);
 
+      // If first page redirected to another origin, treat it as the new base for same-origin logic
+      try {
+        if (depth === 0 && fetchedUrl) {
+          const f = new URL(fetchedUrl);
+          if (!this.isSameOrigin(originBase.toString(), f.toString())) {
+            originBase = f;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+
       // Extract and enqueue anchor links, and scan links with params
       const anchorSet = new Set<string>();
-      $("a[href]").each((_: any, el: any) => {
+      let totalAnchors = 0;
+      let skippedOffsite = 0;
+      let skippedSchemes = 0;
+
+      // helper to process a discovered href-like value
+      const pushHref = (rawHref: string) => {
         try {
-          const href = $(el).attr("href") || "";
+          const href = (rawHref || "").trim();
           if (!href) return;
+          totalAnchors++;
           const abs = this.resolveUrl(url, href);
           if (!abs) return;
-          if (sameOrigin && !this.isSameOrigin(start.toString(), abs)) return;
+          const absUrl = new URL(abs);
+          if (absUrl.protocol !== "http:" && absUrl.protocol !== "https:") {
+            skippedSchemes++;
+            return;
+          }
+          if (sameOrigin && !this.isSameOrigin(originBase.toString(), abs)) {
+            skippedOffsite++;
+            return;
+          }
           const norm = this.normalizeUrl(abs);
           anchorSet.add(norm);
           if (!visited.has(norm) && depth + 1 <= maxDepth) {
@@ -777,7 +865,76 @@ export class Scanner {
         } catch {
           /* ignore */
         }
+      };
+
+      // 1) Standard anchors/areas/links
+      $("a[href], area[href], link[href]").each((_: any, el: any) => {
+        const href = $(el).attr("href") || "";
+        pushHref(href);
       });
+
+      // 2) SPA attributes like routerLink
+      $("*[routerLink]").each((_: any, el: any) => {
+        const rl = $(el).attr("routerLink") || "";
+        pushHref(rl);
+      });
+
+      // 3) Data attributes used as links
+      $("*[data-href]").each((_: any, el: any) => {
+        const dh = $(el).attr("data-href") || "";
+        pushHref(dh);
+      });
+      $("*[data-url]").each((_: any, el: any) => {
+        const du = $(el).attr("data-url") || "";
+        pushHref(du);
+      });
+
+      // 4) onclick handlers that navigate
+      $("*[onclick]").each((_: any, el: any) => {
+        const onclick = ($(el).attr("onclick") || "").toString();
+        // patterns: location='...'; location.href="..."; window.location.assign('...'); replace('...')
+        const patterns = [
+          /location(?:\.href)?\s*=\s*['"]([^'"#;]+)['"]/i,
+          /location\.assign\(\s*['"]([^'"#;]+)['"]\s*\)/i,
+          /location\.replace\(\s*['"]([^'"#;]+)['"]\s*\)/i,
+          /window\.location\s*=\s*['"]([^'"#;]+)['"]/i,
+        ];
+        for (const re of patterns) {
+          const m = re.exec(onclick);
+          if (m && m[1]) pushHref(m[1]);
+        }
+      });
+
+      // 5) Meta refresh redirects
+      $("meta[http-equiv][content]").each((_: any, el: any) => {
+        const hev = ($(el).attr("http-equiv") || "").toString();
+        if (/refresh/i.test(hev)) {
+          const content = ($(el).attr("content") || "").toString();
+          // e.g., "5; url=/next"
+          const m = /url\s*=\s*([^;]+)\s*$/i.exec(content);
+          if (m && m[1]) pushHref(m[1].trim());
+        }
+      });
+
+      // Debug summary for anchors on this page
+      if (this.logger.isEnabled()) {
+        let withParams = 0;
+        for (const href of anchorSet) {
+          try {
+            const u = new URL(href);
+            if (Array.from(u.searchParams.keys()).length) withParams++;
+          } catch {}
+        }
+        this.logger.emit("crawler", `anchors on page`, {
+          page: url,
+          depth,
+          total: totalAnchors,
+          sameOriginKept: anchorSet.size,
+          skippedOffsite,
+          skippedSchemes,
+          withParams,
+        });
+      }
 
       for (const href of anchorSet) {
         try {
@@ -806,14 +963,19 @@ export class Scanner {
 
       // Extract and scan forms
       const formPromises: Promise<ScanResult[]>[] = [];
+      let formsTotal = 0;
       $("form").each((_: any, el: any) => {
         try {
+          formsTotal++;
           const method = (
             $(el).attr("method") || "GET"
           ).toUpperCase() as HttpMethod;
           const actionAttr = $(el).attr("action") || "";
           const actionAbs = this.resolveUrl(url, actionAttr || url) || url;
-          if (sameOrigin && !this.isSameOrigin(start.toString(), actionAbs))
+          if (
+            sameOrigin &&
+            !this.isSameOrigin(originBase.toString(), actionAbs)
+          )
             return;
           const u = new URL(actionAbs);
 
@@ -828,6 +990,11 @@ export class Scanner {
 
           if (names.size === 0) return;
           const fields = Array.from(names);
+          this.logger.emit("crawler", `form discovered`, {
+            action: u.toString(),
+            method,
+            fields,
+          });
 
           if (method === "GET") {
             const sig = this.scanSignature(

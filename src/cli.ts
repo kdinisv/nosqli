@@ -19,6 +19,21 @@ async function main() {
         "Crawl the site starting from the URL and scan discovered links/forms",
       type: "boolean",
     })
+    .option("js", {
+      describe:
+        "Enable JavaScript rendering (Playwright/Puppeteer) during crawl",
+      type: "boolean",
+      default: false,
+    })
+    .option("js-wait-ms", {
+      describe: "Extra wait after page load (ms) for JS apps",
+      type: "number",
+      default: 0,
+    })
+    .option("js-wait-selector", {
+      describe: "Wait for selector to appear before extracting links",
+      type: "string",
+    })
     .option("max-pages", {
       describe: "Crawl page limit",
       type: "number",
@@ -254,6 +269,9 @@ async function main() {
       maxPages: Number((argv as any)["max-pages"]) || 50,
       maxDepth: Number((argv as any)["max-depth"]) || 3,
       sameOrigin: !(argv as any).offsite,
+      jsRender: !!(argv as any).js,
+      jsWaitMs: Number((argv as any)["js-wait-ms"]) || 0,
+      jsWaitSelector: (argv as any)["js-wait-selector"],
     });
     findings = findings.concat(crawlFindings);
   }
