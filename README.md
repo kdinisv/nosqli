@@ -145,6 +145,88 @@ nosqli-scan https://target/graphql \
   --graphql-fields id
 ```
 
+## Примеры от простого к сложному
+
+### 1) Минимальный GET с одним параметром
+
+```
+nosqli-scan https://app.local/search?q=a -g q
+```
+
+### 2) Сканирование тела (логин) и вывод в спецификации
+
+```
+nosqli-scan https://app.local/login -X POST -f username,password -d '{"username":"a","password":"b"}' --format spec
+```
+
+### 3) Краулер с ограничениями глубины/страниц
+
+```
+nosqli-scan https://app.local/ -C --max-pages 40 --max-depth 2
+```
+
+### 4) Фуззинг заголовков и кук
+
+```
+# Заголовки (если --header-names не указан, применяются дефолтные X-Filter/X-Query/X-Search)
+nosqli-scan https://api.local/resource --headers-scan --header-names X-Filter,X-Search -H 'Authorization: Bearer XXX'
+
+# Куки
+nosqli-scan https://api.local/resource --cookies-scan --cookie-names session,filter
+```
+
+### 5) GraphQL: фуззинг переменных
+
+```
+nosqli-scan https://api.local/graphql \
+  --graphql-scan \
+  --graphql-opname GetUser \
+  --graphql-query '{ user(id: $id) { id name } }' \
+  --graphql-fields id
+```
+
+### 6) DoS‑проверки (по времени)
+
+```
+# GET‑параметры
+nosqli-scan https://app.local/search?q=a -g q --dos --dos-threshold 800
+
+# Тело запроса
+nosqli-scan https://app.local/find -X POST -f username -d '{"username":"a"}' --dos --dos-threshold 800
+```
+
+### 7) Манипуляция (широкие фильтры)
+
+```
+nosqli-scan https://app.local/users/update -X PATCH -f filter -d '{"filter":"name"}' --manipulation
+```
+
+### 8) Надёжность HTTP: ретраи, таймауты, прокси
+
+```
+# Ретраи и таймаут
+nosqli-scan https://api.local/items?q=a -g q --retry-max 3 --retry-base-delay 200 --retry-max-delay 2000 --timeout 8000
+
+# Прокси с обходом локалхоста (PowerShell)
+$env:NO_PROXY = "localhost,127.0.0.1"; nosqli-scan https://api.local/items?q=a -g q --proxy http://127.0.0.1:8080
+```
+
+### 9) Отладка и журналы
+
+```
+# Включить подробные события и писать их в JSONL
+nosqli-scan https://app.local/ -C --debug --debug-jsonl dbg.jsonl
+
+# Писать попытки HTTP и сводные метрики
+nosqli-scan https://api.local/items?q=a -g q --http-jsonl http.log.jsonl
+```
+
+### 10) Полный прогон: определение движка + структурированный отчёт
+
+```
+nosqli-scan https://target.local/ -F -C --max-pages 60 --max-depth 3 --format spec
+```
+
 ## Программный API
 
 ```js
