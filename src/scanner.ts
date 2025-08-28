@@ -1,5 +1,6 @@
 // HTTP driver with retry/timeout/proxy support
 import { httpRequest } from "./http.js";
+import { DebugLogger } from "./logger.js";
 import { load } from "cheerio";
 import {
   stringPayloads as mongoStrings,
@@ -58,6 +59,8 @@ export interface ScannerOptions {
   retryUnsafeMethods?: boolean;
   proxy?: string | null; // explicit proxy override
   onHttpAttempt?: (log: import("./http.js").HttpAttemptLog) => void;
+  debug?: boolean;
+  onDebugEvent?: (e: import("./logger.js").DebugEvent) => void;
 }
 
 export interface CrawlOptions {
@@ -81,6 +84,7 @@ export class Scanner {
   };
   private proxy: string | null | undefined;
   private onHttpAttempt?: (log: import("./http.js").HttpAttemptLog) => void;
+  private logger: DebugLogger;
 
   constructor(opts: ScannerOptions = {}) {
     this.timeoutMs = opts.timeoutMs ?? 8000;
@@ -123,6 +127,7 @@ export class Scanner {
     };
     this.proxy = opts.proxy;
     this.onHttpAttempt = opts.onHttpAttempt;
+    this.logger = new DebugLogger(!!opts.debug, opts.onDebugEvent);
   }
 
   async sleep(ms: number) {
@@ -157,6 +162,11 @@ export class Scanner {
       },
       proxyUrl: this.proxy ?? undefined,
       onAttemptLog: (log) => {
+        this.logger.emit(
+          "fetch",
+          `${log.method} ${log.url} attempt=${log.attempt}`,
+          log
+        );
         // Forward to external sink if provided
         if (this.onHttpAttempt) {
           try {
@@ -265,12 +275,20 @@ export class Scanner {
   async scanGet(url: string, params: string[] = []): Promise<ScanResult[]> {
     const results: ScanResult[] = [];
     const base = await this.baselineFetch({ url });
+    this.logger.emit("inject", `GET base ${url}`, {
+      status: base.status,
+      length: base.length,
+    });
     const strings = this.getStringPayloads();
     for (const p of params) {
       for (const pl of strings) {
         const injectedUrl = this.buildUrlWithParam(url, p, pl);
         const cur = await this.baselineFetch({ url: injectedUrl });
         const evidence = this.analyzeDiff(base, cur);
+        this.logger.emit("evidence", `GET param=${p}`, {
+          payload: pl,
+          evidence,
+        });
         const tags: string[] = [];
         if (
           Math.abs(evidence.statusDelta ?? 0) > 0 ||
@@ -732,6 +750,10 @@ export class Scanner {
       // Fetch page
       const res = await this.baselineFetch({ url });
       const html = res.text || "";
+      this.logger.emit("crawler", `fetched ${url}`, {
+        status: res.status,
+        len: html.length,
+      });
       if (!/<\w+/i.test(html)) {
         continue;
       }
@@ -769,6 +791,9 @@ export class Scanner {
             );
             if (!scannedSignatures.has(sig)) {
               scannedSignatures.add(sig);
+              this.logger.emit("crawler", `scan link ${u.toString()}`, {
+                params,
+              });
               const linkFindings = await this.scanGet(u.toString(), params);
               if (linkFindings.length) findings.push(...linkFindings);
             }
@@ -812,6 +837,9 @@ export class Scanner {
             );
             if (!scannedSignatures.has(sig)) {
               scannedSignatures.add(sig);
+              this.logger.emit("crawler", `scan form GET ${u.toString()}`, {
+                fields,
+              });
               formPromises.push(this.scanGet(u.toString(), fields));
             }
           } else {
@@ -824,6 +852,11 @@ export class Scanner {
               scannedSignatures.add(sig);
               const baseBody: Record<string, unknown> = Object.fromEntries(
                 fields.map((f) => [f, "a"])
+              );
+              this.logger.emit(
+                "crawler",
+                `scan form ${method} ${u.toString()}`,
+                { fields }
               );
               formPromises.push(
                 this.scanBody(u.toString(), method, baseBody, fields)

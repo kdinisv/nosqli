@@ -122,6 +122,15 @@ async function main() {
       describe: "Path to write HTTP attempt logs in JSONL format",
       type: "string",
     })
+    .option("debug", {
+      describe: "Enable verbose debug logging",
+      type: "boolean",
+      default: false,
+    })
+    .option("debug-jsonl", {
+      describe: "Path to write debug events in JSONL format",
+      type: "string",
+    })
     .option("db-family", {
       describe: "Target DB family (MongoDB|Elasticsearch|CouchDB)",
       type: "string",
@@ -186,11 +195,18 @@ async function main() {
   let jsonlStream: any = null;
   let metrics: import("./metrics.js").HttpMetrics | null = null;
   const jsonlPath = (argv as any)["http-jsonl"] as string | undefined;
+  // Optional DEBUG JSONL
+  let debugStream: any = null;
+  const debugJsonlPath = (argv as any)["debug-jsonl"] as string | undefined;
   if (jsonlPath) {
     const fs = await import("node:fs");
     jsonlStream = fs.createWriteStream(jsonlPath, { flags: "a" });
     const { HttpMetrics } = await import("./metrics.js");
     metrics = new HttpMetrics();
+  }
+  if (debugJsonlPath) {
+    const fs = await import("node:fs");
+    debugStream = fs.createWriteStream(debugJsonlPath, { flags: "a" });
   }
 
   const scanner = new Scanner({
@@ -204,6 +220,14 @@ async function main() {
     retryMaxDelayMs: Number((argv as any)["retry-max-delay"]) || 2000,
     retryUnsafeMethods: !!(argv as any)["retry-unsafe"],
     proxy: (argv as any)["proxy"] ?? null,
+    debug: !!(argv as any)["debug"],
+    onDebugEvent: (e) => {
+      if (debugStream) {
+        try {
+          debugStream.write(JSON.stringify(e) + "\n");
+        } catch {}
+      }
+    },
     onHttpAttempt: (log) => {
       if (jsonlStream) {
         try {
@@ -324,6 +348,7 @@ async function main() {
       console.log(JSON.stringify(metrics.summary(), null, 2));
     }
     if (jsonlStream) jsonlStream.end();
+    if (debugStream) debugStream.end();
     return;
   }
 
@@ -336,6 +361,7 @@ async function main() {
       console.log(JSON.stringify(metrics.summary(), null, 2));
     }
     if (jsonlStream) jsonlStream.end();
+    if (debugStream) debugStream.end();
     return;
   }
 
@@ -350,6 +376,7 @@ async function main() {
     console.log(JSON.stringify(metrics.summary(), null, 2));
   }
   if (jsonlStream) jsonlStream.end();
+  if (debugStream) debugStream.end();
 }
 
 main().catch((err) => {
