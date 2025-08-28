@@ -31,7 +31,7 @@ nosqli-scan https://example.com/login -X POST -f username,password -d '{"usernam
 ## Программный API
 
 ```js
-const { Scanner } = require("@kdinisv/nosqli");
+import { Scanner } from "@kdinisv/nosqli";
 const scanner = new Scanner({ timeoutMs: 8000, delayMs: 50 });
 
 // GET
@@ -57,3 +57,12 @@ const bodyFindings = await scanner.scanBody(
 ## Лицензия
 
 MIT
+
+## Вклад и развитие
+
+Перед разработкой ориентируйтесь на:
+
+- Технические требования: [requirements.md](./requirements.md)
+- Дорожную карту: [roadmap.md](./roadmap.md)
+
+Процесс контрибуции описан в [CONTRIBUTING.md](./CONTRIBUTING.md).

@@ -1,0 +1,16 @@
+services:
+  juice-shop:
+    image: bkimminich/juice-shop:latest
+    container_name: juice-shop
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=unsafe
+    ports:
+      - "3000:3000"
+    # Uncomment if you want to persist uploads (optional)
+    # volumes:
+    #   - ./data/juice:/home/juice-shop/data
+
+networks:
+  default:
+    name: nosqli-net

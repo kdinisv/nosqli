@@ -3,3 +3,24 @@ node_modules/
 npm-debug.log*
 coverage/
 .tmp/
+
+# Build output
+dist/
+
+# Local output artifacts
+scan-*.json
+
+# Logs
+*.log
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Env files
+.env
+.env.*
+
+# IDE/editor
+.vscode/
+.idea/
+.eslintcache
