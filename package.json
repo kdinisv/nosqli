@@ -1,0 +1,50 @@
+{
+  "name": "@kdinisv/nosqli",
+  "version": "0.1.0",
+  "description": "Lightweight NoSQL injection scanner (inspired by NoSQLMap, CLI & library API similar to sql-scanner).",
+  "keywords": [
+    "security",
+    "scanner",
+    "nosql",
+    "mongodb",
+    "injection",
+    "cli"
+  ],
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "bin": {
+    "nosqli-scan": "bin/cli.js"
+  },
+  "files": [
+    "src",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "jest",
+    "lint": "echo 'no lint configured'",
+  "start": "node bin/cli.js",
+  "example:server": "node examples/local-server.js",
+  "example:scan:get": "node bin/cli.js http://localhost:3005/?q=a -g q",
+  "example:scan:body": "node bin/cli.js http://localhost:3005/login -X POST -f username -d '{\"username\":\"a\"}'"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "dependencies": {
+    "undici": "^6.19.8",
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
