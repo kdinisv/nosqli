@@ -23,12 +23,15 @@ nosqli-scan <url> [options]
 
 Краулер
 
-| Опция           | Алиас | Описание                                                | По умолчанию |
-| --------------- | ----- | ------------------------------------------------------- | ------------ |
-| --crawl         | -C    | Обойти сайт от URL и сканировать найденные ссылки/формы | false        |
-| --max-pages <n> | —     | Лимит страниц                                           | 50           |
-| --max-depth <n> | —     | Глубина обхода                                          | 3            |
-| --offsite       | —     | Разрешить переход на другие origin                      | false        |
+| Опция                    | Алиас | Описание                                                | По умолчанию |
+| ------------------------ | ----- | ------------------------------------------------------- | ------------ |
+| --crawl                  | -C    | Обойти сайт от URL и сканировать найденные ссылки/формы | false        |
+| --max-pages <n>          | —     | Лимит страниц                                           | 50           |
+| --max-depth <n>          | —     | Глубина обхода                                          | 3            |
+| --offsite                | —     | Разрешить переход на другие origin                      | false        |
+| --js                     | —     | Включить JS‑рендер (Playwright/Puppeteer) в краулере    | false        |
+| --js-wait-ms             | —     | Доп. ожидание после загрузки (мс) для SPA               | 0            |
+| --js-wait-selector <css> | —     | Ждать появления селектора перед извлечением ссылок      | —            |
 
 Заголовки/куки/GraphQL
 
@@ -92,6 +95,9 @@ nosqli-scan <url> [options]
   - `--max-pages <n>` — лимит страниц (по умолчанию 50).
   - `--max-depth <n>` — глубина (по умолчанию 3).
   - `--offsite` — разрешить переход на другие origin.
+  - `--js` — включить JS‑рендеринг для SPA (требуется playwright или puppeteer).
+  - `--js-wait-ms <n>` — подождать n миллисекунд после загрузки страницы.
+  - `--js-wait-selector <css>` — дождаться появления CSS‑селектора.
 
 - Заголовки/куки/GraphQL:
 
@@ -163,6 +169,20 @@ nosqli-scan https://app.local/login -X POST -f username,password -d '{"username"
 
 ```
 nosqli-scan https://app.local/ -C --max-pages 40 --max-depth 2
+### 3.1) Краулер SPA с JS‑рендером
+
+```
+
+# Ждать рендер SPA и собирать ссылки
+
+nosqli-scan https://app.local/ -C --js --js-wait-ms 800 --debug --debug-jsonl dbg.jsonl
+
+# Либо дождаться конкретного селектора
+
+nosqli-scan https://app.local/ -C --js --js-wait-selector '#app'
+
+```
+
 ```
 
 ### 4) Фуззинг заголовков и кук
@@ -219,6 +239,12 @@ nosqli-scan https://app.local/ -C --debug --debug-jsonl dbg.jsonl
 
 # Писать попытки HTTP и сводные метрики
 nosqli-scan https://api.local/items?q=a -g q --http-jsonl http.log.jsonl
+Дополнительно для краулера в debug попадают:
+
+- `redirect` — переходы 3xx с полями `from`, `to`, `status`.
+- `fetched` — для каждой страницы: `status`, `len`, `finalUrl`, `js` (использовался ли JS‑рендер),
+  а также сводка `anchors on page` с полями `total`, `sameOriginKept`, `skippedOffsite`, `skippedSchemes`, `withParams`.
+
 ```
 
 ### 10) Полный прогон: определение движка + структурированный отчёт
@@ -258,6 +284,34 @@ const bodyFindings = await scanner.scanBody(
 - Для других движков NoSQL потребуется расширить пэйлоады.
 - Для точности результатов желательно запускать против тестовых стендов.
 - Интеграционные тесты для прокси/таймаутов находятся в процессе добавления (см. roadmap).
+- Краулер теперь следует HTTP‑редиректам (301/302/303/307/308) до 5 переходов и устанавливает базовый origin по финальному URL.
+  Извлечение ссылок учитывает не только `a[href]`, но и `area[href]`, `link[href]`, `routerLink`, `data-href`, `data-url`, переносы по `onclick` и `meta refresh`.
+
+## JS‑рендеринг (SPA)
+
+JS‑рендер включается флагом `--js` и используется только в краулере. Зависимости опциональны, подгружаются динамически:
+
+- Установите один из движков (любой):
+
+```
+# Playwright
+npm i -D playwright
+
+# или Puppeteer
+npm i -D puppeteer
+```
+
+- Затем запустите краул с рендером:
+
+```
+nosqli-scan https://target/ -C --js --js-wait-ms 500 --debug --debug-jsonl dbg.jsonl
+```
+
+Примечания:
+
+- Если первая страница редиректит на другой домен, он становится новым base origin для фильтрации ссылок (если `--offsite` не указан).
+- Если SPA грузится дольше — увеличьте `--js-wait-ms` или укажите `--js-wait-selector`.
+- Если ни `playwright`, ни `puppeteer` не установлены, рендер тихо отключится и будет использован обычный HTTP‑fetch.
 
 ## Поддерживаемые техники и БД
 

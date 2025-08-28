@@ -29,6 +29,9 @@
 ## Этап 3. Кроулер и интеграция (3–4 недели)
 
 - [x] HTML-кроулер (формы GET/POST).
+- [x] Расширенное извлечение ссылок: a/area/link[href], routerLink, data-href, data-url, onclick, meta refresh.
+- [x] Следование редиректам (301/302/303/307/308) до 5 переходов, базовый origin берётся по финальному URL.
+- [x] Опциональный JS-рендер (Playwright/Puppeteer) для SPA; ожидание селектора/таймаута.
 - [ ] Поддержка OpenAPI/Swagger и GraphQL introspection.
 - [ ] Импорт Postman/Har файлов.
 - [ ] Валидация типов параметров (строка/число/булево).
