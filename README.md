@@ -76,6 +76,18 @@ const bodyFindings = await scanner.scanBody(
 - Для точности результатов желательно запускать против тестовых стендов.
 - Интеграционные тесты для прокси/таймаутов находятся в процессе добавления (см. roadmap).
 
+## Поддерживаемые техники и БД
+
+- MongoDB
+  - Boolean-based ($where: return true/false)
+  - Error-based (некорректные операторы, ошибки валидации)
+  - Type juggling (логические/числовые примитивы и несоответствия типов)
+  - Базовые строковые payload-ы ($ne, $regex, $in), $where
+- Elasticsearch
+  - Lucene/Wildcard (скелет), script errors (в процессе)
+- CouchDB
+  - Mango selectors, \_all_docs (скелет)
+
 ## Лицензия
 
 MIT

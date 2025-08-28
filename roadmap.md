@@ -19,7 +19,7 @@
 
 ## Этап 2. Поддержка основных БД и техник (4–6 недель)
 
-- [ ] MongoDB: boolean-based, error-based, type juggling.
+- [x] MongoDB: boolean-based, error-based, type juggling.
 - [ ] Elasticsearch: Lucene _:_, wildcard, script errors.
 - [ ] CouchDB: Mango selectors, \_all_docs.
 - [ ] Cassandra (CQL): error-based, типовые конфликты.
