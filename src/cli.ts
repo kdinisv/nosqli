@@ -71,6 +71,32 @@ async function main() {
       type: "number",
       default: 8000,
     })
+    .option("retry-max", {
+      describe: "Max retry attempts (including first attempt)",
+      type: "number",
+      default: 1,
+    })
+    .option("retry-base-delay", {
+      describe: "Base delay for exponential backoff (ms)",
+      type: "number",
+      default: 200,
+    })
+    .option("retry-max-delay", {
+      describe: "Max delay cap for backoff (ms)",
+      type: "number",
+      default: 2000,
+    })
+    .option("retry-unsafe", {
+      describe:
+        "Allow retries for non-idempotent methods (POST/PUT/PATCH/DELETE)",
+      type: "boolean",
+      default: false,
+    })
+    .option("proxy", {
+      describe:
+        "Proxy URL (overrides HTTP(S)_PROXY). Honors NO_PROXY for bypass.",
+      type: "string",
+    })
     .option("delay", {
       alias: "D",
       describe: "Delay between requests (ms)",
@@ -91,6 +117,10 @@ async function main() {
       describe: "Output format: raw|spec",
       type: "string",
       default: "raw",
+    })
+    .option("http-jsonl", {
+      describe: "Path to write HTTP attempt logs in JSONL format",
+      type: "string",
     })
     .option("db-family", {
       describe: "Target DB family (MongoDB|Elasticsearch|CouchDB)",
@@ -152,12 +182,40 @@ async function main() {
     }
   }
 
+  // Optional JSONL writer and metrics
+  let jsonlStream: any = null;
+  let metrics: import("./metrics.js").HttpMetrics | null = null;
+  const jsonlPath = (argv as any)["http-jsonl"] as string | undefined;
+  if (jsonlPath) {
+    const fs = await import("node:fs");
+    jsonlStream = fs.createWriteStream(jsonlPath, { flags: "a" });
+    const { HttpMetrics } = await import("./metrics.js");
+    metrics = new HttpMetrics();
+  }
+
   const scanner = new Scanner({
     timeoutMs: (argv as any).timeout,
     delayMs: (argv as any).delay,
     headers: extraHeaders,
     dosThresholdMs: Number((argv as any)["dos-threshold"]) || 1000,
     dbFamily: (argv as any)["db-family"],
+    retryMaxAttempts: Number((argv as any)["retry-max"]) || 1,
+    retryBaseDelayMs: Number((argv as any)["retry-base-delay"]) || 200,
+    retryMaxDelayMs: Number((argv as any)["retry-max-delay"]) || 2000,
+    retryUnsafeMethods: !!(argv as any)["retry-unsafe"],
+    proxy: (argv as any)["proxy"] ?? null,
+    onHttpAttempt: (log) => {
+      if (jsonlStream) {
+        try {
+          jsonlStream.write(JSON.stringify({ ts: Date.now(), ...log }) + "\n");
+        } catch {}
+      }
+      if (metrics) {
+        try {
+          metrics.addAttempt(log);
+        } catch {}
+      }
+    },
   });
 
   let findings: any[] = [];
@@ -261,6 +319,11 @@ async function main() {
     );
     const spec = toSpec(findings, dbFamily);
     console.log(JSON.stringify(spec, null, 2));
+    if (metrics) {
+      console.log("\nHTTP metrics:");
+      console.log(JSON.stringify(metrics.summary(), null, 2));
+    }
+    if (jsonlStream) jsonlStream.end();
     return;
   }
 
@@ -268,6 +331,11 @@ async function main() {
     console.log(
       JSON.stringify({ fingerprint: fingerprint ?? null, findings }, null, 2)
     );
+    if (metrics) {
+      console.log("\nHTTP metrics:");
+      console.log(JSON.stringify(metrics.summary(), null, 2));
+    }
+    if (jsonlStream) jsonlStream.end();
     return;
   }
 
@@ -276,6 +344,12 @@ async function main() {
   } else {
     console.log(JSON.stringify(findings, null, 2));
   }
+
+  if (metrics) {
+    console.log("\nHTTP metrics:");
+    console.log(JSON.stringify(metrics.summary(), null, 2));
+  }
+  if (jsonlStream) jsonlStream.end();
 }
 
 main().catch((err) => {

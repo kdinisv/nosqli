@@ -6,14 +6,15 @@
 - [x] Определить язык и стек реализации (Node.js/Python).
 - [x] Реализовать CLI-оболочку (scan, report, help).
 - [x] Подключить поддержку базового ввода (URL, параметры, cookies).
-- [ ] Реализовать драйвер HTTP-запросов (retry, timeout, proxy):
-  - [ ] Retry: правила идемпотентности (по умолчанию GET/HEAD), список ретраибл-ошибок (ECONNRESET/ETIMEDOUT/ENOTFOUND, 502/503/504), maxAttempts, экспоненциальный backoff с jitter, предел максимальной задержки.
-  - [ ] Timeout: единый per-request тайм-аут (AbortController) + фазовые (connect/headers/body), конфигурация из опций/CLI, корректное завершение и отчёт.
-  - [ ] Proxy: поддержка HTTP/HTTPS прокси (ProxyAgent), переменные окружения HTTP_PROXY/HTTPS_PROXY/NO_PROXY, переопределение через флаг CLI (--proxy), опциональная аутентификация.
-  - [ ] Настройки/UX: флаги CLI (--retry-max, --retry-base-delay, --retry-max-delay, --timeout, --proxy), чтение env, разумные значения по умолчанию.
-  - [ ] Логи/метрики: логировать попытки/причины ретраев, счётчики ретраев, p95 latency, итоговые ошибки; JSONL-формат.
-  - [ ] Безопасность: не ретраить неидемпотентные методы по умолчанию (POST/PATCH/PUT/DELETE), whitelist-переключатель.
-  - [ ] Тесты: unit для backoff/фильтров ошибок/тайм-аутов, интеграционные с «флейковым» сервером и прокси.
+- [x] Реализовать драйвер HTTP-запросов (retry, timeout, proxy):
+  - [x] Retry: правила идемпотентности (по умолчанию GET/HEAD), список ретраибл-ошибок (ECONNRESET/ETIMEDOUT/ENOTFOUND, 502/503/504), maxAttempts, экспоненциальный backoff с jitter, предел максимальной задержки.
+  - [x] Timeout: per-request + фазовые (headers/body), конфигурация из опций/CLI; корректное завершение и отчёт. (connect — TBD)
+  - [x] Proxy: поддержка HTTP/HTTPS прокси (ProxyAgent), переменные окружения HTTP_PROXY/HTTPS_PROXY/NO_PROXY, переопределение через флаг CLI (--proxy), аутентификация через URL.
+  - [x] Настройки/UX: флаги CLI (--retry-max, --retry-base-delay, --retry-max-delay, --retry-unsafe, --timeout, --proxy), чтение env, дефолты.
+  - [x] Логи/метрики: JSONL-лог попыток (причины ретраев), счётчики ретраев/ошибок, p50/p95/max latency.
+  - [x] Безопасность: по умолчанию не ретраить неидемпотентные методы, whitelist-флаг (--retry-unsafe).
+  - [x] Тесты (unit): backoff/фильтры ошибок + флейковый сервер (503→200).
+  - [ ] Тесты (интеграционные): медленный сервер (таймауты), прокси/NO_PROXY.
 - [x] Скелет JSON-отчёта.
 
 ## Этап 2. Поддержка основных БД и техник (4–6 недель)

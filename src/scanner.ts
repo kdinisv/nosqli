@@ -1,4 +1,5 @@
-import { request } from "undici";
+// HTTP driver with retry/timeout/proxy support
+import { httpRequest } from "./http.js";
 import { load } from "cheerio";
 import {
   stringPayloads as mongoStrings,
@@ -50,6 +51,13 @@ export interface ScannerOptions {
   headers?: Record<string, string>;
   dosThresholdMs?: number; // consider time delta >= threshold as DoS
   dbFamily?: "MongoDB" | "Elasticsearch" | "CouchDB"; // initial focus
+  // HTTP driver extras
+  retryMaxAttempts?: number;
+  retryBaseDelayMs?: number;
+  retryMaxDelayMs?: number;
+  retryUnsafeMethods?: boolean;
+  proxy?: string | null; // explicit proxy override
+  onHttpAttempt?: (log: import("./http.js").HttpAttemptLog) => void;
 }
 
 export interface CrawlOptions {
@@ -65,6 +73,14 @@ export class Scanner {
   private defaultHeaders: Record<string, string>;
   private dosThresholdMs: number;
   private dbFamily: "MongoDB" | "Elasticsearch" | "CouchDB";
+  private retryCfg: {
+    maxAttempts: number;
+    baseDelayMs: number;
+    maxDelayMs: number;
+    retryUnsafeMethods: boolean;
+  };
+  private proxy: string | null | undefined;
+  private onHttpAttempt?: (log: import("./http.js").HttpAttemptLog) => void;
 
   constructor(opts: ScannerOptions = {}) {
     this.timeoutMs = opts.timeoutMs ?? 8000;
@@ -83,6 +99,14 @@ export class Scanner {
     this.defaultHeaders = { ...(opts.headers ?? {}) };
     this.dosThresholdMs = opts.dosThresholdMs ?? 1000;
     this.dbFamily = opts.dbFamily ?? "MongoDB";
+    this.retryCfg = {
+      maxAttempts: Math.max(1, opts.retryMaxAttempts ?? 1),
+      baseDelayMs: Math.max(1, opts.retryBaseDelayMs ?? 200),
+      maxDelayMs: Math.max(1, opts.retryMaxDelayMs ?? 2000),
+      retryUnsafeMethods: !!opts.retryUnsafeMethods,
+    };
+    this.proxy = opts.proxy;
+    this.onHttpAttempt = opts.onHttpAttempt;
   }
 
   async sleep(ms: number) {
@@ -100,40 +124,49 @@ export class Scanner {
     headers?: Record<string, string>;
     body?: unknown;
   }) {
-    const start = Date.now();
-    const res = await request(url, {
+    const res = await httpRequest(url, {
       method,
       headers: {
         "user-agent": "@kdinisv/nosqli/0.1",
         ...this.defaultHeaders,
         ...headers,
       },
-      // Cast body to string if object, otherwise keep as string or undefined
-      body: ((): any => {
-        if (body == null) return undefined;
-        if (typeof body === "string") return body;
-        try {
-          return JSON.stringify(body as any);
-        } catch {
-          return undefined;
+      body,
+      timeoutMs: this.timeoutMs,
+      retry: {
+        maxAttempts: this.retryCfg.maxAttempts,
+        baseDelayMs: this.retryCfg.baseDelayMs,
+        maxDelayMs: this.retryCfg.maxDelayMs,
+        retryUnsafeMethods: this.retryCfg.retryUnsafeMethods,
+      },
+      proxyUrl: this.proxy ?? undefined,
+      onAttemptLog: (log) => {
+        // Forward to external sink if provided
+        if (this.onHttpAttempt) {
+          try {
+            this.onHttpAttempt(log);
+          } catch {}
         }
-      })(),
-      headersTimeout: this.timeoutMs,
-      bodyTimeout: this.timeoutMs,
+        if (process.env.NOSQLI_HTTP_DEBUG === "1") {
+          // best-effort debug line
+          const base = `[HTTP attempt ${log.attempt}] ${log.method} ${log.url}`;
+          const tail = log.statusCode
+            ? `status=${log.statusCode}`
+            : `error=${log.errorCode}`;
+          const reason = log.willRetry
+            ? ` retry in ${log.retryDelayMs}ms (${log.reason || ""})`
+            : "";
+          // eslint-disable-next-line no-console
+          console.error(`${base} ${tail} ${reason}`.trim());
+        }
+      },
     });
-    const text = await res.body.text();
-    // normalize headers to lowercase keys and string values
-    const hdrs: Record<string, string> = {};
-    for (const [k, v] of Object.entries((res as any).headers ?? {})) {
-      const val = Array.isArray(v) ? v.join(", ") : String(v);
-      hdrs[k.toLowerCase()] = val;
-    }
     return {
-      status: res.statusCode,
-      timeMs: Date.now() - start,
-      text,
-      length: text.length,
-      headers: hdrs,
+      status: res.status,
+      timeMs: res.timeMs,
+      text: res.text,
+      length: res.text.length,
+      headers: res.headers,
     };
   }
 
